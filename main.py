@@ -4,7 +4,7 @@ from google import genai
 import argparse
 from google.genai import types
 from prompts import system_prompt
-from call_function import available_functions
+from call_function import available_functions, call_function
 
 load_dotenv()
 api_key = os.environ.get("GEMINI_API_KEY")
@@ -28,14 +28,29 @@ response = client.models.generate_content(
 
 if response.usage_metadata == None:
     raise RuntimeError("invalid usage metadata")
+
+if args.verbose:
+    print(f"User prompt: {args.user_prompt}")
+    print(f"Prompt tokens: {response.usage_metadata.prompt_token_count}")
+    print(f"Response tokens: {response.usage_metadata.candidates_token_count}")
+
+if response.function_calls:
+    function_results = []
+    for func in response.function_calls:
+        function_call_result = call_function(func, verbose=args.verbose)
+
+        if not function_call_result.parts:
+            raise Exception("empty parts from function_call_result")
+
+        if not function_call_result.parts[0].function_response:
+            raise Exception("invalid function_call_result.parts[0].function_response")
+
+        if function_call_result.parts[0].function_response.response is None:
+            raise Exception("invalid function_call_result.parts[0].function_response.response")
+
+        function_results.append(function_call_result.parts[0])
+
+        if args.verbose:
+            print(f"-> {function_call_result.parts[0].function_response.response}")
 else:
-    if args.verbose:
-        print(f"User prompt: {args.user_prompt}")
-        print(f"Prompt tokens: {response.usage_metadata.prompt_token_count}")
-        print(f"Response tokens: {response.usage_metadata.candidates_token_count}")
-    else:
-        if response.function_calls:
-            for func in response.function_calls:
-                print(f"Calling function: {func.name}({func.args})")
-        else:
-            print(response.text)
+    print(response.text)
