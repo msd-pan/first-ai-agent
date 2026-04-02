@@ -1,4 +1,5 @@
 import os
+import sys
 from dotenv import load_dotenv
 from google import genai
 import argparse
@@ -8,7 +9,7 @@ from call_function import available_functions, call_function
 
 load_dotenv()
 api_key = os.environ.get("GEMINI_API_KEY")
-if api_key == None:
+if api_key is None:
     raise RuntimeError("invalid api key!")
 
 parser = argparse.ArgumentParser(description="Chatbot")
@@ -18,39 +19,56 @@ args = parser.parse_args()
 
 client = genai.Client(api_key=api_key)
 messages = [types.Content(role="user", parts=[types.Part(text=args.user_prompt)])]
-response = client.models.generate_content(
-    model="gemini-2.5-flash",
-    contents=messages,
-    config=types.GenerateContentConfig(
-        tools=[available_functions], system_instruction=system_prompt
-    ),
-)
 
-if response.usage_metadata == None:
-    raise RuntimeError("invalid usage metadata")
+for _ in range(20):
+    response = client.models.generate_content(
+        model="gemini-2.5-flash",
+        contents=messages,
+        config=types.GenerateContentConfig(
+            tools=[available_functions], system_instruction=system_prompt
+        ),
+    )
 
-if args.verbose:
-    print(f"User prompt: {args.user_prompt}")
-    print(f"Prompt tokens: {response.usage_metadata.prompt_token_count}")
-    print(f"Response tokens: {response.usage_metadata.candidates_token_count}")
+    if response.usage_metadata is None:
+        raise RuntimeError("invalid usage metadata")
 
-if response.function_calls:
-    function_results = []
-    for func in response.function_calls:
-        function_call_result = call_function(func, verbose=args.verbose)
+    if args.verbose:
+        print(f"Prompt tokens: {response.usage_metadata.prompt_token_count}")
+        print(f"Response tokens: {response.usage_metadata.candidates_token_count}")
 
-        if not function_call_result.parts:
-            raise Exception("empty parts from function_call_result")
+    # Add model's candidates to conversation history
+    if response.candidates:
+        for candidate in response.candidates:
+            messages.append(candidate.content)
 
-        if not function_call_result.parts[0].function_response:
-            raise Exception("invalid function_call_result.parts[0].function_response")
+    # Check if model wants to call functions
+    if response.function_calls:
+        function_responses = []
+        for func in response.function_calls:
+            function_call_result = call_function(func, verbose=args.verbose)
 
-        if function_call_result.parts[0].function_response.response is None:
-            raise Exception("invalid function_call_result.parts[0].function_response.response")
+            if not function_call_result.parts:
+                raise Exception("empty parts from function_call_result")
 
-        function_results.append(function_call_result.parts[0])
+            if not function_call_result.parts[0].function_response:
+                raise Exception("invalid function_call_result.parts[0].function_response")
 
-        if args.verbose:
-            print(f"-> {function_call_result.parts[0].function_response.response}")
+            if function_call_result.parts[0].function_response.response is None:
+                raise Exception("invalid function_call_result.parts[0].function_response.response")
+
+            function_responses.append(function_call_result.parts[0])
+
+            if args.verbose:
+                print(f"-> {function_call_result.parts[0].function_response.response}")
+
+        # Add function results to conversation history
+        messages.append(types.Content(role="user", parts=function_responses))
+    else:
+        # No function calls - model has final response
+        print("Final response:")
+        print(response.text)
+        break
 else:
-    print(response.text)
+    # Loop completed without breaking - max iterations reached
+    print("Error: Maximum iterations reached without final response")
+    sys.exit(1)
