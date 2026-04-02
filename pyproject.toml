@@ -1,7 +1,7 @@
 [project]
 name = "first-ai-agent"
 version = "0.1.0"
-description = "Add your description here"
+description = "A Python-based AI coding agent powered by Google's Gemini API"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
